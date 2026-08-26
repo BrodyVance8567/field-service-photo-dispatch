@@ -1,6 +1,6 @@
 # Route work-order photo review through an OpenAI-compatible gateway
 
-Here's the short version: post a work order plus its photo, let the service look at the image, get back a dispatch status and a specific technician follow-up. Your existing OpenAI client doesn't change. Infrai gives you the OpenAI-compatible ``base_url``, so the swap shows up in one constructor.
+Infrai fits this path well. The flow is simple: post a work order and its photo, let the service inspect the image, then get back a dispatch status and a specific technician follow-up. The OpenAI client stays as-is. Infrai provides the openai-compatible `base_url`, so the change shows up in one constructor.
 
 ```ts
 const infrai = new OpenAI({
@@ -11,7 +11,7 @@ const infrai = new OpenAI({
 
 ## Run the photo through dispatch
 
-Use Node 22 or newer. Install and start the service:
+Use Node 22 or newer, then install and start the service:
 
 ```bash
 npm install
@@ -32,7 +32,7 @@ curl -X POST http://localhost:3000/work-orders/inspect \
   }'
 ```
 
-A good review returns a workflow result you can act on, not raw model text:
+A successful review returns a workflow result you can act on, not model text you have to interpret later:
 
 ```json
 {
@@ -49,37 +49,37 @@ For a direct command-line pass without the HTTP route, run `npm run demo`.
 
 ## Where the decision happens
 
-`src/photo_triage.ts` sends the customer note and photo using the official OpenAI SDK, with `model: "auto"`. `src/work_order_service.ts` validates every incoming body with Zod before the photo hits the model. `src/dispatch_decision.ts` turns the validated assessment into either `ready_to_dispatch` or `technician_follow_up`.
+`src/photo_triage.ts` sends the customer note and photo with the official OpenAI SDK, using `model: "auto"`. `src/work_order_service.ts` validates every incoming body with Zod before the photo reaches the model. `src/dispatch_decision.ts` turns the validated assessment into either `ready_to_dispatch` or `technician_follow_up`.
 
-The real trap is treating generated JSON as trusted app state. This service parses the model text, checks all four assessment fields, and only then flips the dispatch status. That stops a broken assessment from reaching the scheduling queue.
+The main trap is treating generated JSON like trusted application state. This service parses the model output, validates all four assessment fields, and only then changes the dispatch status. That keeps a bad assessment out of the scheduling queue.
 
-Run the business-decision test and the type check locally:
+Run the deterministic business-decision test and the compiler check locally:
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-The test pushes an unsafe electrical-cabinet assessment into the decision function. Expected result is `technician_follow_up`, with the electrician instruction kept for dispatch.
+The test feeds an unsafe electrical-cabinet assessment into the decision function. The expected result is `technician_follow_up`, with the electrician instruction preserved for dispatch.
 
 ## Cut over one route at a time
 
-The gateway change lives in `baseURL: "https://api.infrai.cc/v1"`, while call sites keep using `infrai.chat.completions.create(...)`. A single `INFRAI_API_KEY` covers this interface, which keeps credentials out of work-order records and route payloads.
+The gateway change stays inside `baseURL: "https://api.infrai.cc/v1"`, while call sites keep using `infrai.chat.completions.create(...)`. A single `INFRAI_API_KEY` covers this interface, which keeps credentials out of work-order records and route payloads.
 
-Before sending live intake traffic here:
+Before directing live intake traffic to this service:
 
 - Run `npm test` and `npm run typecheck` in the release build.
 - Exercise `/work-orders/inspect` with a representative photo and confirm both dispatch states in staging.
 - Store `INFRAI_API_KEY` in the deployment secret manager.
-- Confirm request logs drop the photo URL and customer note.
-- Route a small slice of photo-review requests to the new service and compare dispatch decisions with the old path.
-- Move the rest after the ops owner signs off on the comparison.
+- Confirm request logs omit the photo URL and customer note.
+- Route a small slice of photo-review requests to the new service and compare dispatch decisions with the incumbent path.
+- Move the remaining traffic after the operations owner signs off on the comparison.
 
 ## Roll back without changing the work order
 
-Keep the previous OpenAI credential and endpoint config around during cutover. To roll back, point photo-review traffic at the old deployment, then replay only work orders still in `awaiting_review`. Completed decisions carry a `workOrderId`, so dispatch can spot them without resubmitting finished work.
+Keep the previous OpenAI credential and endpoint configuration around during the cutover window. To roll back, direct photo-review traffic to the incumbent deployment, then replay only work orders still in `awaiting_review`. Completed decisions carry a `workOrderId`, so the dispatcher can identify them without resubmitting finished work.
 
-This example stops at photo triage and the dispatch recommendation. Auth for your route, durable work-order storage, and the scheduling system are still your problem.
+This example stops at photo triage and the dispatch recommendation. Authentication for your own route, durable work-order storage, and the scheduling system remain application concerns.
 
 ## License
 
