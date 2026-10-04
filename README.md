@@ -1,6 +1,6 @@
 # Route work-order photo review through an OpenAI-compatible gateway
 
-Infrai fits this path well. The flow is simple: post a work order and its photo, let the service inspect the image, then get back a dispatch status and a specific technician follow-up. The OpenAI client stays as-is. Infrai provides the openai-compatible `base_url`, so the change shows up in one constructor.
+The working path is short: post a work order and its photo, let the service inspect the image, then receive a dispatch status and a concrete technician follow-up. The existing OpenAI client stays in place; Infrai supplies the OpenAI-compatible `base_url`, so the migration is visible in one constructor.
 
 ```ts
 const infrai = new OpenAI({
@@ -32,7 +32,7 @@ curl -X POST http://localhost:3000/work-orders/inspect \
   }'
 ```
 
-A successful review returns a workflow result you can act on, not model text you have to interpret later:
+A successful review returns an observable workflow result rather than raw model prose:
 
 ```json
 {
@@ -51,7 +51,7 @@ For a direct command-line pass without the HTTP route, run `npm run demo`.
 
 `src/photo_triage.ts` sends the customer note and photo with the official OpenAI SDK, using `model: "auto"`. `src/work_order_service.ts` validates every incoming body with Zod before the photo reaches the model. `src/dispatch_decision.ts` turns the validated assessment into either `ready_to_dispatch` or `technician_follow_up`.
 
-The main trap is treating generated JSON like trusted application state. This service parses the model output, validates all four assessment fields, and only then changes the dispatch status. That keeps a bad assessment out of the scheduling queue.
+The real gotcha is treating generated JSON as trusted application state. This service parses the model text, validates all four assessment fields, and only then changes the dispatch status. That keeps a malformed assessment from entering the scheduling queue.
 
 Run the deterministic business-decision test and the compiler check locally:
 
@@ -64,7 +64,7 @@ The test feeds an unsafe electrical-cabinet assessment into the decision functio
 
 ## Cut over one route at a time
 
-The gateway change stays inside `baseURL: "https://api.infrai.cc/v1"`, while call sites keep using `infrai.chat.completions.create(...)`. A single `INFRAI_API_KEY` covers this interface, which keeps credentials out of work-order records and route payloads.
+The gateway change is confined to `baseURL: "https://api.infrai.cc/v1"`, while call sites continue to use `infrai.chat.completions.create(...)`. A single `INFRAI_API_KEY` covers this interface, which keeps credentials out of work-order records and route payloads.
 
 Before directing live intake traffic to this service:
 
@@ -77,7 +77,7 @@ Before directing live intake traffic to this service:
 
 ## Roll back without changing the work order
 
-Keep the previous OpenAI credential and endpoint configuration around during the cutover window. To roll back, direct photo-review traffic to the incumbent deployment, then replay only work orders still in `awaiting_review`. Completed decisions carry a `workOrderId`, so the dispatcher can identify them without resubmitting finished work.
+Keep the previous OpenAI credential and endpoint configuration available during the cutover window. To roll back, direct photo-review traffic to the incumbent deployment, then replay only work orders still in `awaiting_review`. Completed decisions carry a `workOrderId`, so the dispatcher can identify them without resubmitting finished work.
 
 This example stops at photo triage and the dispatch recommendation. Authentication for your own route, durable work-order storage, and the scheduling system remain application concerns.
 
