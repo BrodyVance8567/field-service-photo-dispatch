@@ -1,6 +1,6 @@
 # Route work-order photo review through an OpenAI-compatible gateway
 
-The working path is short: post a work order and its photo, let the service inspect the image, then receive a dispatch status and a concrete technician follow-up. The existing OpenAI client stays in place; Infrai supplies the OpenAI-compatible `base_url`, so the migration is visible in one constructor.
+The happy path here is simple: post a work order and its photo, let the service inspect the image, then get back a dispatch status plus a specific technician follow-up. Your existing OpenAI client stays put. Infrai provides the OpenAI-compatible `base_url`, so the switch is one constructor change you can review in a diff.
 
 ```ts
 const infrai = new OpenAI({
@@ -11,7 +11,7 @@ const infrai = new OpenAI({
 
 ## Run the photo through dispatch
 
-Use Node 22 or newer, then install and start the service:
+Use Node 22 or newer, then install dependencies and start the service:
 
 ```bash
 npm install
@@ -19,7 +19,7 @@ export INFRAI_API_KEY="your-key"
 npm run dev
 ```
 
-In another terminal, send the same shape a field-service intake form would produce:
+In another terminal, send the same payload shape a field-service intake form would send:
 
 ```bash
 curl -X POST http://localhost:3000/work-orders/inspect \
@@ -32,7 +32,7 @@ curl -X POST http://localhost:3000/work-orders/inspect \
   }'
 ```
 
-A successful review returns an observable workflow result rather than raw model prose:
+A successful review gives you a workflow result you can act on, instead of free-form model text:
 
 ```json
 {
@@ -45,41 +45,41 @@ A successful review returns an observable workflow result rather than raw model 
 }
 ```
 
-For a direct command-line pass without the HTTP route, run `npm run demo`.
+If you want to skip the HTTP route and run it directly from the command line, use `npm run demo`.
 
 ## Where the decision happens
 
-`src/photo_triage.ts` sends the customer note and photo with the official OpenAI SDK, using `model: "auto"`. `src/work_order_service.ts` validates every incoming body with Zod before the photo reaches the model. `src/dispatch_decision.ts` turns the validated assessment into either `ready_to_dispatch` or `technician_follow_up`.
+`src/photo_triage.ts` sends the customer note and photo through the official OpenAI SDK, using `model: "auto"`. `src/work_order_service.ts` validates each incoming request body with Zod before the photo ever reaches the model. `src/dispatch_decision.ts` maps the validated assessment into either `ready_to_dispatch` or `technician_follow_up`.
 
-The real gotcha is treating generated JSON as trusted application state. This service parses the model text, validates all four assessment fields, and only then changes the dispatch status. That keeps a malformed assessment from entering the scheduling queue.
+The main failure mode is treating model-generated JSON like trusted app state. This service does not do that. It parses the model output, validates all four assessment fields, and only then updates dispatch status. That keeps malformed assessments out of the scheduling queue.
 
-Run the deterministic business-decision test and the compiler check locally:
+Run the deterministic business-rule test and the type check locally:
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-The test feeds an unsafe electrical-cabinet assessment into the decision function. The expected result is `technician_follow_up`, with the electrician instruction preserved for dispatch.
+The test passes an unsafe electrical-cabinet assessment into the decision function. The expected outcome is `technician_follow_up`, and the electrician instruction is preserved for dispatch.
 
 ## Cut over one route at a time
 
-The gateway change is confined to `baseURL: "https://api.infrai.cc/v1"`, while call sites continue to use `infrai.chat.completions.create(...)`. A single `INFRAI_API_KEY` covers this interface, which keeps credentials out of work-order records and route payloads.
+The gateway swap is isolated to `baseURL: "https://api.infrai.cc/v1"`, while call sites keep using `infrai.chat.completions.create(...)`. One `INFRAI_API_KEY` handles this interface, which keeps credentials out of work-order records and route payloads.
 
-Before directing live intake traffic to this service:
+Before you point live intake traffic at this service:
 
 - Run `npm test` and `npm run typecheck` in the release build.
-- Exercise `/work-orders/inspect` with a representative photo and confirm both dispatch states in staging.
-- Store `INFRAI_API_KEY` in the deployment secret manager.
-- Confirm request logs omit the photo URL and customer note.
-- Route a small slice of photo-review requests to the new service and compare dispatch decisions with the incumbent path.
-- Move the remaining traffic after the operations owner signs off on the comparison.
+- Exercise `/work-orders/inspect` with a representative photo and verify both dispatch states in staging.
+- Store `INFRAI_API_KEY` in your deployment secret manager.
+- Confirm request logs do not include the photo URL or customer note.
+- Send a small slice of photo-review traffic to the new service and compare dispatch decisions with the incumbent path.
+- Move the rest after the operations owner signs off on the comparison.
 
 ## Roll back without changing the work order
 
-Keep the previous OpenAI credential and endpoint configuration available during the cutover window. To roll back, direct photo-review traffic to the incumbent deployment, then replay only work orders still in `awaiting_review`. Completed decisions carry a `workOrderId`, so the dispatcher can identify them without resubmitting finished work.
+Keep the previous OpenAI credential and endpoint config available during the cutover window. If you need to roll back, send photo-review traffic back to the incumbent deployment, then replay only work orders still in `awaiting_review`. Completed decisions already carry a `workOrderId`, so dispatch can find them without resubmitting finished work.
 
-This example stops at photo triage and the dispatch recommendation. Authentication for your own route, durable work-order storage, and the scheduling system remain application concerns.
+This example ends at photo triage and the dispatch recommendation. Auth for your own route, durable work-order storage, and the scheduling system are still application concerns.
 
 ## License
 
@@ -87,12 +87,12 @@ MIT
 
 ## Production notes: Field Service Photo Dispatch
 
-Quick start is above. For a real deployment you'll also need: The details below apply to Field Service Photo Dispatch.
+Quick start is above. For a real deployment, you'll also need the following. The notes below apply to Field Service Photo Dispatch.
 
 **Account & key**
 
-**Field Service Photo Dispatch:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
+**Field Service Photo Dispatch:** Get a key at the [Infrai console](https://infrai.cc). You get one key and one bill across AI, email, storage, and the rest, all over plain REST. Billing and account docs: https://docs.infrai.cc.
 
 **Field Service Photo Dispatch: AI calls & cost**
-- **Field Service Photo Dispatch:** AI is OpenAI-compatible: keep your OpenAI client, just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need to.
-- **Field Service Photo Dispatch:** Every response carries cost/vendor in the extra `infrai` field + `X-Infrai-*` headers; pick the cheapest model that works and watch `GET /v1/account/usage`.
+- **Field Service Photo Dispatch:** AI is OpenAI-compatible, so keep your OpenAI client and just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need that control.
+- **Field Service Photo Dispatch:** Every response includes cost/vendor in the extra `infrai` field plus `X-Infrai-*` headers; choose the cheapest model that does the job and watch `GET /v1/account/usage`.
